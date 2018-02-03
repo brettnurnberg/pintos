@@ -43,6 +43,8 @@ Brett Nurnberg <brettnurnberg@k-state.edu>
 >> A4: How are race conditions avoided when multiple threads call
 >> timer_sleep() simultaneously?
 
+The only static global variable is a semaphore, which automatically
+handles race conditions by disabling interrupts.
 
 >> A5: How are race conditions avoided when a timer interrupt occurs
 >> during a call to timer_sleep()?

@@ -20,11 +20,8 @@
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
 
-/* List of sleeping threads */
-static struct list sleepers;
-
-/* lock for sleeping start time */
-static struct lock sleep_lock;
+/* semaphore for sleeping threads */
+static struct semaphore timer_sema;
 
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
@@ -36,6 +33,9 @@ static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
 static void check_sleepers (void);
+static bool sleep_sort_fnc (const struct list_elem *a,
+                            const struct list_elem *b,
+                            void *aux);
 
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
@@ -44,7 +44,7 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
-  list_init (&sleepers);
+  sema_init(&timer_sema, 0);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -97,31 +97,26 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 {
-  enum intr_level old_level;
-  
   ASSERT (intr_get_level () == INTR_ON);
   
-  /* acquire lock */
-  //lock_acquire(&sleep_lock);
-  
+  enum intr_level old_level;
+  old_level = intr_disable ();
+
   /* get current thread */
   struct thread *t = thread_current ();
   
   /* set thread wake time */
   t->wake_time = timer_ticks () + ticks;
-
-  /* add to list */
-  old_level = intr_disable ();
-  list_push_back (&sleepers, &t->elem);
-  printf("%s added to list\n", t->name);
-  thread_block();
-  intr_set_level (old_level);
-
-
   
-  /* release lock and block thread */
-  //lock_release(&sleep_lock);
-
+  while(timer_sema.value)
+  {
+    thread_yield();
+  }
+  
+  /* insert thread in semaphore list */
+  sema_down_sorted(&timer_sema, (list_less_func*)(&sleep_sort_fnc), NULL);
+  
+  intr_set_level(old_level);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -201,33 +196,26 @@ timer_interrupt (struct intr_frame *args UNUSED)
   ticks++;
   thread_tick ();
   
-  if(!list_empty(&sleepers))
-    check_sleepers();
+  if(!list_empty(&timer_sema.waiters))
+    check_sleepers ();
 }
 
 /* Check sleeper threads to be woken up */
 static void check_sleepers (void)
 {
   struct list_elem *e;
+  struct thread *t;
 
   ASSERT (intr_get_level () == INTR_OFF);
 
-  e = list_begin(&sleepers);
-
-  while(e != list_end(&sleepers))
+  e = list_begin (&timer_sema.waiters);
+  t = list_entry (e, struct thread, elem);
+  
+  while(timer_ticks () >= t->wake_time)
   {
-    struct thread *t = list_entry (e, struct thread, elem);
-    
-    if(timer_ticks() > t->wake_time)
-    {
-      e = list_remove(e);
-      thread_unblock(t);
-    }
-    else
-    {
-      e = list_next(e);
-    }
-
+	sema_up (&timer_sema);
+	e = list_begin (&timer_sema.waiters);
+    t = list_entry (e, struct thread, elem);
   }
 }
 
@@ -282,13 +270,13 @@ real_time_sleep (int64_t num, int32_t denom)
       /* We're waiting for at least one full timer tick.  Use
          timer_sleep() because it will yield the CPU to other
          processes. */                
-      timer_sleep (ticks); 
+      timer_sleep (ticks);
     }
   else 
     {
       /* Otherwise, use a busy-wait loop for more accurate
          sub-tick timing. */
-      real_time_delay (num, denom); 
+      real_time_delay (num, denom);
     }
 }
 
@@ -300,4 +288,15 @@ real_time_delay (int64_t num, int32_t denom)
      the possibility of overflow. */
   ASSERT (denom % 1000 == 0);
   busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000)); 
+}
+
+/* Sorts the list of waiters by wake time */
+static bool sleep_sort_fnc (const struct list_elem *a,
+                            const struct list_elem *b,
+                            void *aux)
+{
+  struct thread *ta = list_entry (a, struct thread, elem);
+  struct thread *tb = list_entry (b, struct thread, elem);
+  
+  return ta->wake_time <= tb->wake_time;
 }
