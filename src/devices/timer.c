@@ -23,9 +23,6 @@ static int64_t ticks;
 /* List of sleeping threads */
 static struct list sleepers;
 
-/* lock for sleeping start time */
-static struct lock sleep_lock;
-
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
@@ -101,9 +98,6 @@ timer_sleep (int64_t ticks)
   
   ASSERT (intr_get_level () == INTR_ON);
   
-  /* acquire lock */
-  //lock_acquire(&sleep_lock);
-  
   /* get current thread */
   struct thread *t = thread_current ();
   
@@ -116,11 +110,6 @@ timer_sleep (int64_t ticks)
   printf("%s added to list\n", t->name);
   thread_block();
   intr_set_level (old_level);
-
-
-  
-  /* release lock and block thread */
-  //lock_release(&sleep_lock);
 
 }
 

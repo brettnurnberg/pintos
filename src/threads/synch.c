@@ -32,6 +32,10 @@
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
+static bool prty_sort (const struct list_elem *a,
+                       const struct list_elem *b,
+                       void *aux);
+
 /* Initializes semaphore SEMA to VALUE.  A semaphore is a
    nonnegative integer along with two atomic operators for
    manipulating it:
@@ -68,7 +72,7 @@ sema_down (struct semaphore *sema)
   old_level = intr_disable ();
   while (sema->value == 0) 
     {
-      list_push_back (&sema->waiters, &thread_current ()->elem);
+      list_insert_ordered (&sema->waiters, &thread_current ()->elem, (list_less_func*)(&prty_sort), NULL);
       thread_block ();
     }
   sema->value--;
@@ -156,6 +160,17 @@ sema_test_helper (void *sema_)
       sema_up (&sema[1]);
     }
 }
+
+/* Sorts threads by priority from high to low */
+static bool prty_sort (const struct list_elem *a,
+                       const struct list_elem *b,
+                       void *aux)
+{
+  struct thread *ta = list_entry (a, struct thread, elem);
+  struct thread *tb = list_entry (b, struct thread, elem);
+
+  return tb->priority < ta->priority;
+}
 
 /* Initializes LOCK.  A lock can be held by at most a single
    thread at any given time.  Our locks are not "recursive", that
@@ -195,8 +210,18 @@ lock_acquire (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
-
+	
+  if(lock->holder != NULL)
+  {
+		printf("Current thread: %d\nHolder: %d\n", thread_get_priority(), lock->holder->priority);
+		if(thread_get_priority () > lock->holder->priority)
+		{
+			thread_donate_priority(lock->holder);
+		}
+  }
+  
   sema_down (&lock->semaphore);
+	
   lock->holder = thread_current ();
 }
 
@@ -228,10 +253,13 @@ lock_try_acquire (struct lock *lock)
 void
 lock_release (struct lock *lock) 
 {
-  ASSERT (lock != NULL);
+	ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
-
+	
+  lock->holder->priority = lock->holder->org_priority;
+	
   lock->holder = NULL;
+	
   sema_up (&lock->semaphore);
 }
 

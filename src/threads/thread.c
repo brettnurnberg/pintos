@@ -244,7 +244,8 @@ thread_unblock (struct thread *t)
   ASSERT (t->status == THREAD_BLOCKED);
   list_insert_ordered (&ready_list, &t->elem, (list_less_func*)(&prty_sort), NULL);
   t->status = THREAD_READY;
-  
+  intr_set_level (old_level);
+	
   ASSERT (!list_empty (&ready_list));
   e_next = list_begin (&ready_list);
   t_next = list_entry (e_next, struct thread, elem);
@@ -254,7 +255,7 @@ thread_unblock (struct thread *t)
 	thread_yield ();
   }
   
-  intr_set_level (old_level);
+
 }
 
 /* Returns the name of the running thread. */
@@ -351,6 +352,15 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+  thread_current ()->org_priority = new_priority;
+}
+
+/* Sets the current thread's priority to NEW_PRIORITY. */
+void
+thread_donate_priority (struct thread *t) 
+{
+  t->priority = thread_get_priority ();
+	printf("Donated %d\n", thread_get_priority ());
 }
 
 /* Returns the current thread's priority. */
@@ -477,6 +487,7 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->org_priority = priority;
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
