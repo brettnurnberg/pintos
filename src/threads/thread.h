@@ -4,6 +4,7 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/synch.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -14,6 +15,14 @@ enum thread_status
     THREAD_DYING        /* About to be destroyed. */
   };
 
+/* Data for a sleeping thread */
+struct sleep
+	{
+		struct semaphore sema;              /* sema to block thread */
+		struct list_elem elem;              /* used for list of sleepers */
+		int64_t wake_time;                  /* time to wake thread */
+	};
+	
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
@@ -92,6 +101,9 @@ struct thread
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
+		
+		/* Owned by timer.c */
+		struct sleep sleep;                 /* sleeping thread data */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
