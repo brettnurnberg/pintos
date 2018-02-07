@@ -24,7 +24,15 @@ static int64_t ticks;
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
 
+/* List of sleeping threads */
+static struct list sleep_list;
+
+/* Lock to add to sleep_list */
+static struct lock sleep_lock;
+
 static intr_handler_func timer_interrupt;
+static list_less_func sleep_sort;
+static void wake_threads (void);
 static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
@@ -37,6 +45,8 @@ timer_init (void)
 {
   pit_configure_channel (0, 2, TIMER_FREQ);
   intr_register_ext (0x20, timer_interrupt, "8254 Timer");
+	list_init (&sleep_list);
+	lock_init (&sleep_lock);
 }
 
 /* Calibrates loops_per_tick, used to implement brief delays. */
@@ -89,11 +99,17 @@ timer_elapsed (int64_t then)
 void
 timer_sleep (int64_t ticks) 
 {
-  int64_t start = timer_ticks ();
-
   ASSERT (intr_get_level () == INTR_ON);
-  while (timer_elapsed (start) < ticks) 
-    thread_yield ();
+	struct thread *t = thread_current ();
+	
+	t->sleep.wake_time = timer_ticks () + ticks;
+	sema_init (&t->sleep.sema, 0);
+	
+	lock_acquire (&sleep_lock);
+	list_insert_ordered (&sleep_list, &t->sleep.elem, &sleep_sort, NULL);
+	lock_release (&sleep_lock);
+	
+	sema_down (&t->sleep.sema);
 }
 
 /* Sleeps for approximately MS milliseconds.  Interrupts must be
@@ -172,6 +188,31 @@ timer_interrupt (struct intr_frame *args UNUSED)
 {
   ticks++;
   thread_tick ();
+	
+	if (!list_empty (&sleep_list))
+		wake_threads ();
+}
+
+/* Wakes threads that have slept for specified time */
+static void
+wake_threads (void)
+{
+	struct sleep *sleeper = list_entry(list_begin (&sleep_list), struct sleep, elem);
+	
+	while (timer_ticks () >= sleeper->wake_time)
+	{
+		sema_up (&sleeper->sema);
+		list_pop_front(&sleep_list);
+		
+		if (!list_empty (&sleep_list))
+		{
+			sleeper = list_entry(list_begin (&sleep_list), struct sleep, elem);
+		}
+		else
+		{
+			break;
+		}
+	}
 }
 
 /* Returns true if LOOPS iterations waits for more than one timer
@@ -243,4 +284,16 @@ real_time_delay (int64_t num, int32_t denom)
      the possibility of overflow. */
   ASSERT (denom % 1000 == 0);
   busy_wait (loops_per_tick * num / 1000 * TIMER_FREQ / (denom / 1000)); 
+}
+
+/* Sorts sleeping threads by wake_time */
+static bool
+sleep_sort (const struct list_elem *a,
+            const struct list_elem *b,
+            void *aux)
+{
+	struct sleep *new_sleeper = list_entry(a, struct sleep, elem);
+	struct sleep *curr_sleeper = list_entry(b, struct sleep, elem);
+	
+	return new_sleeper->wake_time < curr_sleeper->wake_time;
 }
