@@ -61,6 +61,7 @@ bool thread_mlfqs;
 
 static void kernel_thread (thread_func *, void *aux);
 
+static list_less_func prty_sort;
 static void idle (void *aux UNUSED);
 static struct thread *running_thread (void);
 static struct thread *next_thread_to_run (void);
@@ -234,12 +235,24 @@ thread_unblock (struct thread *t)
   enum intr_level old_level;
 
   ASSERT (is_thread (t));
-
+  
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_push_back (&ready_list, &t->elem);
+  list_insert_ordered (&ready_list, &t->elem, &prty_sort, NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
+  
+  if (t != initial_thread && t->priority > thread_current ()->priority)
+  {
+    if (intr_context ())
+    {
+      intr_yield_on_return ();
+    }
+    else
+    {
+      thread_yield ();
+    }
+  }
 }
 
 /* Returns the name of the running thread. */
@@ -305,10 +318,10 @@ thread_yield (void)
   enum intr_level old_level;
   
   ASSERT (!intr_context ());
-
+  
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_push_back (&ready_list, &cur->elem);
+    list_insert_ordered (&ready_list, &cur->elem, &prty_sort, NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -336,6 +349,7 @@ void
 thread_set_priority (int new_priority) 
 {
   thread_current ()->priority = new_priority;
+  thread_current ()->org_priority = new_priority;
 }
 
 /* Returns the current thread's priority. */
@@ -343,6 +357,13 @@ int
 thread_get_priority (void) 
 {
   return thread_current ()->priority;
+}
+
+/* Donates the current threads priority */
+void
+thread_donate_priority (struct thread *t)
+{
+  t->priority = thread_get_priority ();
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -462,6 +483,7 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
+  t->org_priority = priority;
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
@@ -578,6 +600,19 @@ allocate_tid (void)
 
   return tid;
 }
+
+/* Sorts threads by priority from high to low */
+static bool prty_sort(const struct list_elem *a,
+                      const struct list_elem *b,
+											void *aux UNUSED)
+{
+  struct thread *ta = list_entry (a, struct thread, elem);
+  struct thread *tb = list_entry (b, struct thread, elem);
+
+  return tb->priority < ta->priority;
+}
+
+
 
 /* Offset of `stack' member within `struct thread'.
    Used by switch.S, which can't figure it out on its own. */

@@ -290,7 +290,7 @@ real_time_delay (int64_t num, int32_t denom)
 static bool
 sleep_sort (const struct list_elem *a,
             const struct list_elem *b,
-            void *aux)
+            void *aux UNUSED)
 {
 	struct sleep *new_sleeper = list_entry(a, struct sleep, elem);
 	struct sleep *curr_sleeper = list_entry(b, struct sleep, elem);
