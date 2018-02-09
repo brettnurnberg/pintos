@@ -72,6 +72,9 @@ static void *alloc_frame (struct thread *, size_t size);
 static void schedule (void);
 void thread_schedule_tail (struct thread *prev);
 static tid_t allocate_tid (void);
+static bool prty_sort (const struct list_elem *a,
+                       const struct list_elem *b,
+                       void *aux);
 
 /* Initializes the threading system by transforming the code
    that's currently running into a thread.  This can't work in
@@ -234,13 +237,25 @@ void
 thread_unblock (struct thread *t) 
 {
   enum intr_level old_level;
-
+  struct list_elem *e_next;
+  struct thread *t_next;
+  
   ASSERT (is_thread (t));
   
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
   list_insert_ordered (&ready_list, &t->elem, &prty_sort, NULL);
   t->status = THREAD_READY;
+  
+  ASSERT (!list_empty (&ready_list));
+  e_next = list_begin (&ready_list);
+  t_next = list_entry (e_next, struct thread, elem);
+  
+  if(t->priority > t_next->priority)
+  {
+	thread_yield ();
+  }
+  
   intr_set_level (old_level);
   
   if (is_boot_complete () && t->priority > thread_current ()->priority)

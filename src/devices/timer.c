@@ -20,6 +20,12 @@
 /* Number of timer ticks since OS booted. */
 static int64_t ticks;
 
+/* List of sleeping threads */
+static struct list sleepers;
+
+/* lock for sleeping start time */
+static struct lock sleep_lock;
+
 /* Number of loops per timer tick.
    Initialized by timer_calibrate(). */
 static unsigned loops_per_tick;
@@ -37,6 +43,7 @@ static bool too_many_loops (unsigned loops);
 static void busy_wait (int64_t loops);
 static void real_time_sleep (int64_t num, int32_t denom);
 static void real_time_delay (int64_t num, int32_t denom);
+static void check_sleepers (void);
 
 /* Sets up the timer to interrupt TIMER_FREQ times per second,
    and registers the corresponding interrupt. */
