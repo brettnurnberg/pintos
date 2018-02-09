@@ -5,6 +5,7 @@
 #include <stdio.h>
 #include <string.h>
 #include "threads/flags.h"
+#include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
 #include "threads/palloc.h"
@@ -242,7 +243,7 @@ thread_unblock (struct thread *t)
   t->status = THREAD_READY;
   intr_set_level (old_level);
   
-  if (t != initial_thread && t->priority > thread_current ()->priority)
+  if (is_boot_complete () && t->priority > thread_current ()->priority)
   {
     if (intr_context ())
     {
@@ -253,6 +254,8 @@ thread_unblock (struct thread *t)
       thread_yield ();
     }
   }
+
+
 }
 
 /* Returns the name of the running thread. */
@@ -350,6 +353,24 @@ thread_set_priority (int new_priority)
 {
   thread_current ()->priority = new_priority;
   thread_current ()->org_priority = new_priority;
+  
+  if(!list_empty(&ready_list))
+  {
+    struct thread *t = list_entry(list_begin(&ready_list), struct thread, elem);
+    
+    if (thread_current ()->priority < t->priority)
+    {
+      if (intr_context ())
+      {
+        intr_yield_on_return ();
+      }
+      else
+      {
+        thread_yield ();
+      }
+    }
+  }
+  
 }
 
 /* Returns the current thread's priority. */
