@@ -97,14 +97,16 @@ struct thread
     char name[16];                      /* Name (for debugging purposes). */
     uint8_t *stack;                     /* Saved stack pointer. */
     int priority;                       /* Priority. */
-    int org_priority;                   /* Original priority. */
     struct list_elem allelem;           /* List element for all threads list. */
 
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
+    
+    /* Owned by synch.c */
+    struct list priorities;             /* List of donated priorities */
 		
-		/* Owned by timer.c */
-		struct sleep sleep;                 /* sleeping thread data */
+	  /* Owned by timer.c */
+	  struct sleep sleep;                 /* sleeping thread data */
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -115,6 +117,13 @@ struct thread
     unsigned magic;                     /* Detects stack overflow. */
   };
 
+/* Priority element for list of donated priorities */
+struct priority_elem
+  {
+    struct list_elem elem;
+    int priority;
+  };
+  
 /* If false (default), use round-robin scheduler.
    If true, use multi-level feedback queue scheduler.
    Controlled by kernel command-line option "-o mlfqs". */
@@ -146,6 +155,7 @@ void thread_foreach (thread_action_func *, void *);
 int thread_get_priority (void);
 void thread_set_priority (int);
 void thread_donate_priority (struct thread *t);
+void thread_undonate_priority (struct thread *t);
 
 int thread_get_nice (void);
 void thread_set_nice (int);

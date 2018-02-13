@@ -62,6 +62,7 @@ bool thread_mlfqs;
 
 static void kernel_thread (thread_func *, void *aux);
 
+static list_less_func thread_prty_sort;
 static list_less_func prty_sort;
 static void idle (void *aux UNUSED);
 static struct thread *running_thread (void);
@@ -239,7 +240,7 @@ thread_unblock (struct thread *t)
   
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_insert_ordered (&ready_list, &t->elem, &prty_sort, NULL);
+  list_insert_ordered (&ready_list, &t->elem, &thread_prty_sort, NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
   
@@ -278,6 +279,7 @@ thread_current (void)
      have overflowed its stack.  Each thread has less than 4 kB
      of stack, so a few big automatic arrays or moderate
      recursion can cause stack overflow. */
+  ASSERT(t != NULL);//added for debug
   ASSERT (is_thread (t));
   ASSERT (t->status == THREAD_RUNNING);
 
@@ -324,7 +326,7 @@ thread_yield (void)
   
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_insert_ordered (&ready_list, &cur->elem, &prty_sort, NULL);
+    list_insert_ordered (&ready_list, &cur->elem, &thread_prty_sort, NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -351,8 +353,11 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
-  thread_current ()->org_priority = new_priority;
+  struct thread *ts = thread_current ();
+  
+  ts->priority = new_priority;
+  struct priority_elem *e = list_entry(list_end(&ts->priorities), struct priority_elem, elem);
+  e->priority = new_priority;
   
   if(!list_empty(&ready_list))
   {
@@ -384,7 +389,40 @@ thread_get_priority (void)
 void
 thread_donate_priority (struct thread *t)
 {
-  t->priority = thread_get_priority ();
+  struct priority_elem *e;
+  
+  e = list_entry (list_end(&t->priorities), struct priority_elem, elem);
+  
+  if(thread_get_priority () > e->priority)
+  {
+    e->priority = thread_get_priority ();
+    list_insert_ordered(&t->priorities, &e->elem, &prty_sort, NULL);
+  }
+  
+  e = list_entry (list_begin(&t->priorities), struct priority_elem, elem);
+  t->priority = e->priority;
+}
+
+/* Resets priority of thread upon releasing lock */
+void
+thread_undonate_priority (struct thread *t)
+{
+  struct priority_elem *e = list_entry (list_end (&thread_current ()->priorities), struct priority_elem, elem);
+  
+  if (t->priority > e->priority)
+  {
+    e = list_entry (list_begin (&thread_current ()->priorities), struct priority_elem, elem);
+    
+    while( e->priority != t->priority)
+    {
+      e = list_entry (list_next (&e->elem), struct priority_elem, elem);
+    }
+    
+    list_remove(&e->elem);
+  }
+  
+  e = list_entry (list_begin (&thread_current ()->priorities), struct priority_elem, elem);
+  t->priority = e->priority;
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -504,8 +542,12 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
-  t->org_priority = priority;
   t->magic = THREAD_MAGIC;
+  
+  list_init(&t->priorities);
+  struct priority_elem e;
+  e.priority = priority;
+  list_push_back(&t->priorities, &e.elem);
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
@@ -623,7 +665,7 @@ allocate_tid (void)
 }
 
 /* Sorts threads by priority from high to low */
-static bool prty_sort(const struct list_elem *a,
+static bool thread_prty_sort(const struct list_elem *a,
                       const struct list_elem *b,
 											void *aux UNUSED)
 {
@@ -631,6 +673,17 @@ static bool prty_sort(const struct list_elem *a,
   struct thread *tb = list_entry (b, struct thread, elem);
 
   return tb->priority < ta->priority;
+}
+
+/* Sorts priority elements by priority from high to low */
+static bool prty_sort(const struct list_elem *a,
+                      const struct list_elem *b,
+											void *aux UNUSED)
+{
+  struct priority_elem *pa = list_entry (a, struct priority_elem, elem);
+  struct priority_elem *pb = list_entry (b, struct priority_elem, elem);
+
+  return pb->priority < pa->priority;
 }
 
 
