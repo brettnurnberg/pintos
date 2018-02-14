@@ -8,6 +8,7 @@
 #include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
+#include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/switch.h"
 #include "threads/synch.h"
@@ -62,6 +63,7 @@ bool thread_mlfqs;
 
 static void kernel_thread (thread_func *, void *aux);
 
+static list_less_func thread_prty_sort;
 static list_less_func prty_sort;
 static void idle (void *aux UNUSED);
 static struct thread *running_thread (void);
@@ -239,7 +241,7 @@ thread_unblock (struct thread *t)
   
   old_level = intr_disable ();
   ASSERT (t->status == THREAD_BLOCKED);
-  list_insert_ordered (&ready_list, &t->elem, &prty_sort, NULL);
+  list_insert_ordered (&ready_list, &t->elem, &thread_prty_sort, NULL);
   t->status = THREAD_READY;
   intr_set_level (old_level);
   
@@ -324,7 +326,7 @@ thread_yield (void)
   
   old_level = intr_disable ();
   if (cur != idle_thread) 
-    list_insert_ordered (&ready_list, &cur->elem, &prty_sort, NULL);
+    list_insert_ordered (&ready_list, &cur->elem, &thread_prty_sort, NULL);
   cur->status = THREAD_READY;
   schedule ();
   intr_set_level (old_level);
@@ -351,12 +353,23 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  thread_current ()->priority = new_priority;
-  thread_current ()->org_priority = new_priority;
-  
-  if(!list_empty(&ready_list))
+  printf("thread_set_priority is called\n");
+  struct thread *t = thread_current ();
+
+  if (!list_empty (&t->priorities))
   {
-    struct thread *t = list_entry(list_begin(&ready_list), struct thread, elem);
+    struct priority_elem *org_prty_elem = list_entry (list_rbegin (&t->priorities), struct priority_elem, elem);
+    org_prty_elem->priority = new_priority;
+  }
+
+  t->priority = new_priority;
+  
+  /* technically, all priority elements with priority lower or equal to
+  new priority should be removed from list. */
+  
+  if (!list_empty (&ready_list))
+  {
+    t = list_entry(list_begin (&ready_list), struct thread, elem);
     
     if (thread_current ()->priority < t->priority)
     {
@@ -382,9 +395,79 @@ thread_get_priority (void)
 
 /* Donates the current threads priority */
 void
-thread_donate_priority (struct thread *t)
+thread_donate_priority (struct thread *t_rec, struct thread *t_waiter)
 {
-  t->priority = thread_get_priority ();
+  struct priority_elem *org_prty_elem;
+
+  if (list_empty (&t_rec->priorities))
+  {
+    org_prty_elem = (struct priority_elem*) malloc (sizeof (struct priority_elem));
+    org_prty_elem->priority = t_rec->priority;
+    list_push_back (&t_rec->priorities, &org_prty_elem->elem);
+  }
+  else
+  {
+    org_prty_elem = list_entry (list_rbegin (&t_rec->priorities), struct priority_elem, elem);
+  }
+
+  if (t_waiter != NULL && t_waiter->priority > org_prty_elem->priority)
+  {
+    struct priority_elem *prty_elem;
+    struct list_elem *e;
+    
+    e = list_begin (&t_rec->priorities);
+    prty_elem = list_entry(e, struct priority_elem, elem);
+    
+    while (prty_elem->priority != t_waiter->priority)
+    {
+      e = list_next (e);
+      prty_elem = list_entry(e, struct priority_elem, elem);
+    }
+    
+    list_remove (e);
+    free (prty_elem);
+  }
+  
+  if (thread_get_priority () > org_prty_elem->priority)
+  {
+    struct priority_elem *new_prty_elem = (struct priority_elem*) malloc (sizeof (struct priority_elem));
+    struct priority_elem *top_prty_elem;
+    
+    new_prty_elem->priority = thread_get_priority ();
+    list_insert_ordered (&t_rec->priorities, &new_prty_elem->elem, &prty_sort, NULL); 
+    
+    top_prty_elem = list_entry (list_begin (&t_rec->priorities), struct priority_elem, elem);
+    t_rec->priority = top_prty_elem->priority;
+  }
+}
+
+/* Resets priority of thread upon releasing lock */
+void
+thread_undonate_priority (struct thread *t_next)
+{
+  struct thread *t_curr = thread_current ();
+  struct priority_elem *org_prty_elem = list_entry (list_rbegin (&t_curr->priorities), struct priority_elem, elem);
+  
+  if (t_next->priority > org_prty_elem->priority)
+  {
+    struct list_elem *e;
+    struct priority_elem *prty_elem;
+    struct priority_elem *top_prty_elem;
+    
+    e = list_begin (&t_curr->priorities);
+    prty_elem = list_entry(e, struct priority_elem, elem);
+    
+    while (prty_elem->priority != t_next->priority)
+    {
+      e = list_next (e);
+      prty_elem = list_entry(e, struct priority_elem, elem);
+    }
+    
+    list_remove (e);
+    free (prty_elem);
+    top_prty_elem = list_entry (list_begin (&t_curr->priorities), struct priority_elem, elem);
+    t_curr->priority = top_prty_elem->priority;
+  }
 }
 
 /* Sets the current thread's nice value to NICE. */
@@ -504,7 +587,7 @@ init_thread (struct thread *t, const char *name, int priority)
   strlcpy (t->name, name, sizeof t->name);
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
-  t->org_priority = priority;
+  list_init (&t->priorities);
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
@@ -623,7 +706,7 @@ allocate_tid (void)
 }
 
 /* Sorts threads by priority from high to low */
-static bool prty_sort(const struct list_elem *a,
+static bool thread_prty_sort(const struct list_elem *a,
                       const struct list_elem *b,
 											void *aux UNUSED)
 {
@@ -633,6 +716,16 @@ static bool prty_sort(const struct list_elem *a,
   return tb->priority < ta->priority;
 }
 
+/* Sorts priority elements by priority from high to low */
+static bool prty_sort(const struct list_elem *a,
+                      const struct list_elem *b,
+										  void *aux UNUSED)
+{
+  struct priority_elem *pa = list_entry (a, struct priority_elem, elem);
+  struct priority_elem *pb = list_entry (b, struct priority_elem, elem);
+
+  return pb->priority < pa->priority;
+}
 
 
 /* Offset of `stack' member within `struct thread'.

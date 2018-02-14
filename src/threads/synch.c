@@ -29,6 +29,7 @@
 #include "threads/synch.h"
 #include <stdio.h>
 #include <string.h>
+#include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
@@ -213,14 +214,11 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
-  if(lock->holder != NULL)
+  if (lock->holder != NULL && is_boot_complete ())
   {
-    if(thread_get_priority () > lock->holder->priority)
-    {
-      thread_donate_priority (lock->holder);
-    }
+    thread_donate_priority (lock->holder, list_entry (list_begin (&lock->semaphore.waiters), struct thread, elem));
   }
-  
+ 
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
 }
@@ -256,7 +254,8 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
-  lock->holder->priority = lock->holder->org_priority;
+  if (!list_empty (&thread_current ()->priorities) && !list_empty (&lock->semaphore.waiters) && is_boot_complete ())
+    thread_undonate_priority (list_entry (list_begin (&lock->semaphore.waiters), struct thread, elem));
   
   lock->holder = NULL;
   sema_up (&lock->semaphore);

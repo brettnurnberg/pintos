@@ -1,0 +1,324 @@
+diff --git a/src/threads/synch.c b/src/threads/synch.c
+index 55f047b..d580bbd 100755
+--- a/src/threads/synch.c
++++ b/src/threads/synch.c
+@@ -29,6 +29,7 @@
+ #include "threads/synch.h"
+ #include <stdio.h>
+ #include <string.h>
++#include "threads/init.h"
+ #include "threads/interrupt.h"
+ #include "threads/thread.h"
+ 
+@@ -209,20 +210,20 @@ lock_init (struct lock *lock)
+ void
+ lock_acquire (struct lock *lock)
+ {
++  printf("c1\n");
+   ASSERT (lock != NULL);
+   ASSERT (!intr_context ());
+   ASSERT (!lock_held_by_current_thread (lock));
+ 
+-  if(lock->holder != NULL)
++  if (lock->holder != NULL && is_boot_complete ())
+   {
+-    if(thread_get_priority () > lock->holder->priority)
+-    {
+-      thread_donate_priority (lock->holder);
+-    }
++    thread_donate_priority (lock->holder);
+   }
+-  
++
+   sema_down (&lock->semaphore);
++
+   lock->holder = thread_current ();
++  printf("d1\n");
+ }
+ 
+ /* Tries to acquires LOCK and returns true if successful or false
+@@ -255,8 +256,9 @@ lock_release (struct lock *lock)
+ {
+   ASSERT (lock != NULL);
+   ASSERT (lock_held_by_current_thread (lock));
+-
+-  lock->holder->priority = lock->holder->org_priority;
++  
++  if (!list_empty (&lock->semaphore.waiters) && is_boot_complete ())
++    thread_undonate_priority (list_entry (list_begin (&lock->semaphore.waiters), struct thread, elem));
+   
+   lock->holder = NULL;
+   sema_up (&lock->semaphore);
+diff --git a/src/threads/thread.c b/src/threads/thread.c
+index fcfb84b..5f06981 100755
+--- a/src/threads/thread.c
++++ b/src/threads/thread.c
+@@ -8,6 +8,7 @@
+ #include "threads/init.h"
+ #include "threads/interrupt.h"
+ #include "threads/intr-stubs.h"
++#include "threads/malloc.h"
+ #include "threads/palloc.h"
+ #include "threads/switch.h"
+ #include "threads/synch.h"
+@@ -62,6 +63,7 @@ bool thread_mlfqs;
+ 
+ static void kernel_thread (thread_func *, void *aux);
+ 
++static list_less_func thread_prty_sort;
+ static list_less_func prty_sort;
+ static void idle (void *aux UNUSED);
+ static struct thread *running_thread (void);
+@@ -239,7 +241,7 @@ thread_unblock (struct thread *t)
+   
+   old_level = intr_disable ();
+   ASSERT (t->status == THREAD_BLOCKED);
+-  list_insert_ordered (&ready_list, &t->elem, &prty_sort, NULL);
++  list_insert_ordered (&ready_list, &t->elem, &thread_prty_sort, NULL);
+   t->status = THREAD_READY;
+   intr_set_level (old_level);
+   
+@@ -272,12 +274,12 @@ struct thread *
+ thread_current (void) 
+ {
+   struct thread *t = running_thread ();
+-  
+   /* Make sure T is really a thread.
+      If either of these assertions fire, then your thread may
+      have overflowed its stack.  Each thread has less than 4 kB
+      of stack, so a few big automatic arrays or moderate
+      recursion can cause stack overflow. */
++  ASSERT(t != NULL);//added for debug
+   ASSERT (is_thread (t));
+   ASSERT (t->status == THREAD_RUNNING);
+ 
+@@ -324,7 +326,7 @@ thread_yield (void)
+   
+   old_level = intr_disable ();
+   if (cur != idle_thread) 
+-    list_insert_ordered (&ready_list, &cur->elem, &prty_sort, NULL);
++    list_insert_ordered (&ready_list, &cur->elem, &thread_prty_sort, NULL);
+   cur->status = THREAD_READY;
+   schedule ();
+   intr_set_level (old_level);
+@@ -351,12 +353,19 @@ thread_foreach (thread_action_func *func, void *aux)
+ void
+ thread_set_priority (int new_priority) 
+ {
+-  thread_current ()->priority = new_priority;
+-  thread_current ()->org_priority = new_priority;
++  printf("thread_set_priority is called\n");
++  struct thread *t = thread_current ();
++  struct priority_elem *org_prty_elem = list_entry (list_end (&t->priorities), struct priority_elem, elem);
++  
++  t->priority = new_priority;
++  org_prty_elem->priority = new_priority;
++  
++  /* technically, all priority elements with priority lower or equal to
++  new priority should be removed from list. */
+   
+-  if(!list_empty(&ready_list))
++  if (!list_empty (&ready_list))
+   {
+-    struct thread *t = list_entry(list_begin(&ready_list), struct thread, elem);
++    t = list_entry(list_begin (&ready_list), struct thread, elem);
+     
+     if (thread_current ()->priority < t->priority)
+     {
+@@ -384,7 +393,94 @@ thread_get_priority (void)
+ void
+ thread_donate_priority (struct thread *t)
+ {
+-  t->priority = thread_get_priority ();
++  struct priority_elem *org_prty_elem;
++  
++  if (list_empty (&t->priorities))
++  {
++    org_prty_elem = (struct priority_elem*) malloc (sizeof (struct priority_elem));
++    org_prty_elem->priority = t->priority;
++    list_push_back(&t->priorities, &org_prty_elem->elem);
++  }
++  else
++  {
++    org_prty_elem = list_entry (list_end (&t->priorities), struct priority_elem, elem);
++  }
++  
++  if (thread_get_priority () > org_prty_elem->priority)
++  {
++    struct priority_elem *new_prty_elem = (struct priority_elem*) malloc (sizeof (struct priority_elem));
++    struct priority_elem *top_prty_elem;
++    
++    new_prty_elem->priority = thread_get_priority ();
++    list_insert_ordered (&t->priorities, &new_prty_elem->elem, &prty_sort, NULL); 
++    
++    top_prty_elem = list_entry (list_begin (&t->priorities), struct priority_elem, elem);
++    t->priority = top_prty_elem->priority;
++  }
++  
++#if 0
++  struct priority_elem *e;
++  
++  e = list_entry (list_end(&t->priorities), struct priority_elem, elem);
++  
++  if(thread_get_priority () > e->priority)
++  {
++    e->priority = thread_get_priority ();
++    list_insert_ordered(&t->priorities, &e->elem, &prty_sort, NULL);
++  }
++  
++  e = list_entry (list_begin(&t->priorities), struct priority_elem, elem);
++  t->priority = e->priority;
++  
++#endif
++}
++
++/* Resets priority of thread upon releasing lock */
++void
++thread_undonate_priority (struct thread *t_next)
++{
++  struct thread *t_curr = thread_current ();
++  struct priority_elem *org_prty_elem = list_entry (list_end (&t_curr->priorities), struct priority_elem, elem);
++  
++  if (t_next->priority > org_prty_elem->priority)
++  {
++    struct list_elem *e;
++    struct priority_elem *prty_elem;
++    struct priority_elem *top_prty_elem;
++    
++    e = list_begin (&t_curr->priorities);
++    prty_elem = list_entry(e, struct priority_elem, elem);
++    
++    while (prty_elem->priority != t_next->priority)
++    {
++      e = list_next (e);
++      prty_elem = list_entry(e, struct priority_elem, elem);
++    }
++    
++    list_remove (e);
++    free (prty_elem);
++    top_prty_elem = list_entry (list_begin (&t_curr->priorities), struct priority_elem, elem);
++    t_curr->priority = top_prty_elem->priority;
++  }
++
++#if 0
++  struct priority_elem *e = list_entry (list_end (&thread_current ()->priorities), struct priority_elem, elem);
++  
++  if (t->priority > e->priority)
++  {
++    e = list_entry (list_begin (&thread_current ()->priorities), struct priority_elem, elem);
++    
++    while( e->priority != t->priority)
++    {
++      e = list_entry (list_next (&e->elem), struct priority_elem, elem);
++    }
++    
++    list_remove(&e->elem);
++  }
++  
++  e = list_entry (list_begin (&thread_current ()->priorities), struct priority_elem, elem);
++  t->priority = e->priority;
++#endif
+ }
+ 
+ /* Sets the current thread's nice value to NICE. */
+@@ -504,9 +600,17 @@ init_thread (struct thread *t, const char *name, int priority)
+   strlcpy (t->name, name, sizeof t->name);
+   t->stack = (uint8_t *) t + PGSIZE;
+   t->priority = priority;
+-  t->org_priority = priority;
+   t->magic = THREAD_MAGIC;
++  
++  list_init (&t->priorities);
++  
++  /* The current bug is that malloc() cannot be called by a thread that is not set to running, I.E. main.
++     malloc() acquires a lock, which asserts that the current thread does not hold the lock, which
++     asserts that the thread status is THREAD_RUNNING, which is false in the case of main.
+ 
++     A possible fix is to create the list of priority elements and enter the original item only
++     in priority donate if the list of priorities is empty. */
++  
+   old_level = intr_disable ();
+   list_push_back (&all_list, &t->allelem);
+   intr_set_level (old_level);
+@@ -623,7 +727,7 @@ allocate_tid (void)
+ }
+ 
+ /* Sorts threads by priority from high to low */
+-static bool prty_sort(const struct list_elem *a,
++static bool thread_prty_sort(const struct list_elem *a,
+                       const struct list_elem *b,
+ 											void *aux UNUSED)
+ {
+@@ -633,6 +737,17 @@ static bool prty_sort(const struct list_elem *a,
+   return tb->priority < ta->priority;
+ }
+ 
++/* Sorts priority elements by priority from high to low */
++static bool prty_sort(const struct list_elem *a,
++                      const struct list_elem *b,
++											void *aux UNUSED)
++{
++  struct priority_elem *pa = list_entry (a, struct priority_elem, elem);
++  struct priority_elem *pb = list_entry (b, struct priority_elem, elem);
++
++  return pb->priority < pa->priority;
++}
++
+ 
+ 
+ /* Offset of `stack' member within `struct thread'.
+diff --git a/src/threads/thread.h b/src/threads/thread.h
+index b55ac74..a25e6f7 100755
+--- a/src/threads/thread.h
++++ b/src/threads/thread.h
+@@ -22,6 +22,13 @@ struct sleep
+ 		struct list_elem elem;              /* used for list of sleepers */
+ 		int64_t wake_time;                  /* time to wake thread */
+ 	};
++
++/* Priority element for list of donated priorities */
++struct priority_elem
++  {
++    struct list_elem elem;
++    int priority;
++  };
+ 	
+ /* Thread identifier type.
+    You can redefine this to whatever type you like. */
+@@ -97,14 +104,16 @@ struct thread
+     char name[16];                      /* Name (for debugging purposes). */
+     uint8_t *stack;                     /* Saved stack pointer. */
+     int priority;                       /* Priority. */
+-    int org_priority;                   /* Original priority. */
+     struct list_elem allelem;           /* List element for all threads list. */
+ 
+     /* Shared between thread.c and synch.c. */
+     struct list_elem elem;              /* List element. */
++    
++    /* Owned by synch.c */
++    struct list priorities;             /* List of donated priorities */
+ 		
+-		/* Owned by timer.c */
+-		struct sleep sleep;                 /* sleeping thread data */
++	  /* Owned by timer.c */
++	  struct sleep sleep;                 /* sleeping thread data */
+ 
+ #ifdef USERPROG
+     /* Owned by userprog/process.c. */
+@@ -114,7 +123,7 @@ struct thread
+     /* Owned by thread.c. */
+     unsigned magic;                     /* Detects stack overflow. */
+   };
+-
++  
+ /* If false (default), use round-robin scheduler.
+    If true, use multi-level feedback queue scheduler.
+    Controlled by kernel command-line option "-o mlfqs". */
+@@ -146,6 +155,7 @@ void thread_foreach (thread_action_func *, void *);
+ int thread_get_priority (void);
+ void thread_set_priority (int);
+ void thread_donate_priority (struct thread *t);
++void thread_undonate_priority (struct thread *t_next);
+ 
+ int thread_get_nice (void);
+ void thread_set_nice (int);
