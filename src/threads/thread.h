@@ -19,6 +19,7 @@ enum thread_status
 struct priority_elem
   {
     int priority;
+    struct lock *lock;
     struct list_elem elem;
   };
   
@@ -114,6 +115,7 @@ struct thread
     
     /* Owned by synch.c */
     struct list priorities;
+    struct lock *lock_req;
 
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
@@ -154,7 +156,7 @@ void thread_foreach (thread_action_func *, void *);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
-void thread_donate_priority (struct thread *t_rec, struct thread *t_waiter);
+void thread_donate_priority (struct thread *t_rec, struct lock* lock);
 void thread_undonate_priority (struct thread *t_next);
 
 int thread_get_nice (void);

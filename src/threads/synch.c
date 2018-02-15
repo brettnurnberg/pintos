@@ -214,13 +214,29 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
-  if (lock->holder != NULL && is_boot_complete ())
+  struct thread *t = thread_current ();
+  struct lock *lock_i;
+  //when setting lock required, we could check if it is null, and if it is not null, then do not set it and do not unset it.
+  t->lock_req = lock;
+  enum intr_level old_level;
+
+  if (is_boot_complete () && lock->holder != NULL)
   {
-    thread_donate_priority (lock->holder, list_entry (list_begin (&lock->semaphore.waiters), struct thread, elem));
+    old_level = intr_disable ();
+    while (t != NULL && t->lock_req != NULL)
+    {
+      lock_i = t->lock_req;
+      thread_donate_priority (t->lock_req->holder, t->lock_req);
+      t->lock_req = lock_i;
+      t = t->lock_req->holder;
+    }
+    intr_set_level (old_level);
+
   }
- 
+  
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
+  thread_current ()->lock_req = NULL;
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -256,7 +272,7 @@ lock_release (struct lock *lock)
 
   if (!list_empty (&thread_current ()->priorities) && !list_empty (&lock->semaphore.waiters) && is_boot_complete ())
     thread_undonate_priority (list_entry (list_begin (&lock->semaphore.waiters), struct thread, elem));
-  
+
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }
