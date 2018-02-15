@@ -29,7 +29,6 @@
 #include "threads/synch.h"
 #include <stdio.h>
 #include <string.h>
-#include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
@@ -214,13 +213,21 @@ lock_acquire (struct lock *lock)
   ASSERT (!intr_context ());
   ASSERT (!lock_held_by_current_thread (lock));
 
-  if (lock->holder != NULL && is_boot_complete ())
+  struct thread *t = thread_current ();
+  t->lock_req = lock;
+
+  if (lock->holder != NULL)
   {
-    thread_donate_priority (lock->holder, list_entry (list_begin (&lock->semaphore.waiters), struct thread, elem));
+    while (t != NULL && t->lock_req != NULL)
+    {
+      t->lock_req = thread_donate_priority (t->lock_req->holder, t->lock_req);
+      t = t->lock_req->holder;
+    }
   }
- 
+  
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
+  thread_current ()->lock_req = NULL;
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
@@ -254,9 +261,9 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
-  if (!list_empty (&thread_current ()->priorities) && !list_empty (&lock->semaphore.waiters) && is_boot_complete ())
+  if (!list_empty (&thread_current ()->priorities) && !list_empty (&lock->semaphore.waiters))
     thread_undonate_priority (list_entry (list_begin (&lock->semaphore.waiters), struct thread, elem));
-  
+
   lock->holder = NULL;
   sema_up (&lock->semaphore);
 }

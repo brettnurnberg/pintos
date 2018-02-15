@@ -353,7 +353,6 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  printf("thread_set_priority is called\n");
   struct thread *t = thread_current ();
 
   if (!list_empty (&t->priorities))
@@ -363,9 +362,6 @@ thread_set_priority (int new_priority)
   }
 
   t->priority = new_priority;
-  
-  /* technically, all priority elements with priority lower or equal to
-  new priority should be removed from list. */
   
   if (!list_empty (&ready_list))
   {
@@ -394,15 +390,19 @@ thread_get_priority (void)
 }
 
 /* Donates the current threads priority */
-void
-thread_donate_priority (struct thread *t_rec, struct thread *t_waiter)
+struct lock *
+thread_donate_priority (struct thread *t_rec, struct lock* lock)
 {
   struct priority_elem *org_prty_elem;
 
+  /* Creates the original priority element for the priority
+     list or simply gets the original priority element. */
   if (list_empty (&t_rec->priorities))
   {
     org_prty_elem = (struct priority_elem*) malloc (sizeof (struct priority_elem));
     org_prty_elem->priority = t_rec->priority;
+    ASSERT(lock != NULL);
+    org_prty_elem->lock = lock;
     list_push_back (&t_rec->priorities, &org_prty_elem->elem);
   }
   else
@@ -410,44 +410,50 @@ thread_donate_priority (struct thread *t_rec, struct thread *t_waiter)
     org_prty_elem = list_entry (list_rbegin (&t_rec->priorities), struct priority_elem, elem);
   }
 
-  if (t_waiter != NULL && t_waiter->priority > org_prty_elem->priority)
+  /* Checks the list of priorities to see if a priority
+  has already been donated for this lock. If so, it removes
+  that priority element. */
+  struct priority_elem *prty_elem;
+  struct list_elem *e;
+
+  for (e = list_begin (&t_rec->priorities); e != list_rbegin (&t_rec->priorities); e = list_next (e))
   {
-    struct priority_elem *prty_elem;
-    struct list_elem *e;
-    
-    e = list_begin (&t_rec->priorities);
-    prty_elem = list_entry(e, struct priority_elem, elem);
-    
-    while (prty_elem->priority != t_waiter->priority)
+    prty_elem = list_entry (e, struct priority_elem, elem);
+    if (prty_elem->lock == lock)
     {
-      e = list_next (e);
-      prty_elem = list_entry(e, struct priority_elem, elem);
+      list_remove (e);
+      free (prty_elem);
+      break;
     }
-    
-    list_remove (e);
-    free (prty_elem);
   }
   
+  /* Creates the new priority element and adds it to the list
+  of priorities. */
   if (thread_get_priority () > org_prty_elem->priority)
   {
     struct priority_elem *new_prty_elem = (struct priority_elem*) malloc (sizeof (struct priority_elem));
     struct priority_elem *top_prty_elem;
     
     new_prty_elem->priority = thread_get_priority ();
+    ASSERT(lock != NULL);
+    new_prty_elem->lock = lock;
     list_insert_ordered (&t_rec->priorities, &new_prty_elem->elem, &prty_sort, NULL); 
     
     top_prty_elem = list_entry (list_begin (&t_rec->priorities), struct priority_elem, elem);
     t_rec->priority = top_prty_elem->priority;
   }
+  
+  return lock;
 }
 
-/* Resets priority of thread upon releasing lock */
+/* Sets priority of thread upon releasing lock. */
 void
 thread_undonate_priority (struct thread *t_next)
 {
   struct thread *t_curr = thread_current ();
   struct priority_elem *org_prty_elem = list_entry (list_rbegin (&t_curr->priorities), struct priority_elem, elem);
   
+  /* Remove the donated priority from the list. */
   if (t_next->priority > org_prty_elem->priority)
   {
     struct list_elem *e;
@@ -465,6 +471,9 @@ thread_undonate_priority (struct thread *t_next)
     
     list_remove (e);
     free (prty_elem);
+    
+    /* Set the priority of the thread to the highest
+       priority in the donated list. */
     top_prty_elem = list_entry (list_begin (&t_curr->priorities), struct priority_elem, elem);
     t_curr->priority = top_prty_elem->priority;
   }
@@ -588,6 +597,7 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   list_init (&t->priorities);
+  t->lock_req = NULL;
   t->magic = THREAD_MAGIC;
 
   old_level = intr_disable ();
