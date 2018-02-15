@@ -353,7 +353,6 @@ thread_foreach (thread_action_func *func, void *aux)
 void
 thread_set_priority (int new_priority) 
 {
-  printf("thread_set_priority is called\n");
   struct thread *t = thread_current ();
 
   if (!list_empty (&t->priorities))
@@ -363,9 +362,6 @@ thread_set_priority (int new_priority)
   }
 
   t->priority = new_priority;
-  
-  /* technically, all priority elements with priority lower or equal to
-  new priority should be removed from list. */
   
   if (!list_empty (&ready_list))
   {
@@ -394,23 +390,19 @@ thread_get_priority (void)
 }
 
 /* Donates the current threads priority */
-void
+struct lock *
 thread_donate_priority (struct thread *t_rec, struct lock* lock)
 {
   struct priority_elem *org_prty_elem;
-  struct lock *lock_i = lock; //this may not be necessary. we may be able to use lock the whole time.
-  
-  /*--------------------------------------------------------
-  Creates the original priority element for the priority
-  list or simply gets the original priority element
-  --------------------------------------------------------*/
+
+  /* Creates the original priority element for the priority
+     list or simply gets the original priority element. */
   if (list_empty (&t_rec->priorities))
   {
     org_prty_elem = (struct priority_elem*) malloc (sizeof (struct priority_elem));
     org_prty_elem->priority = t_rec->priority;
-    ASSERT(lock_i != NULL);
     ASSERT(lock != NULL);
-    org_prty_elem->lock = lock_i;
+    org_prty_elem->lock = lock;
     list_push_back (&t_rec->priorities, &org_prty_elem->elem);
   }
   else
@@ -418,18 +410,16 @@ thread_donate_priority (struct thread *t_rec, struct lock* lock)
     org_prty_elem = list_entry (list_rbegin (&t_rec->priorities), struct priority_elem, elem);
   }
 
-  /*--------------------------------------------------------
-  Checks the list of priorities to see if a priority
+  /* Checks the list of priorities to see if a priority
   has already been donated for this lock. If so, it removes
-  that priority element.
-  --------------------------------------------------------*/
+  that priority element. */
   struct priority_elem *prty_elem;
   struct list_elem *e;
-  
+
   for (e = list_begin (&t_rec->priorities); e != list_rbegin (&t_rec->priorities); e = list_next (e))
   {
     prty_elem = list_entry (e, struct priority_elem, elem);
-    if (prty_elem->lock == lock_i)
+    if (prty_elem->lock == lock)
     {
       list_remove (e);
       free (prty_elem);
@@ -437,33 +427,33 @@ thread_donate_priority (struct thread *t_rec, struct lock* lock)
     }
   }
   
-  /*--------------------------------------------------------
-  Creates the new priority element and adds it to the list
-  of priorities.
-  --------------------------------------------------------*/
+  /* Creates the new priority element and adds it to the list
+  of priorities. */
   if (thread_get_priority () > org_prty_elem->priority)
   {
-    //printf("thread %s donated priority %d to thread %s\n", thread_name (), thread_get_priority(), t_rec->name);
     struct priority_elem *new_prty_elem = (struct priority_elem*) malloc (sizeof (struct priority_elem));
     struct priority_elem *top_prty_elem;
     
     new_prty_elem->priority = thread_get_priority ();
-    ASSERT(lock_i != NULL);
-    new_prty_elem->lock = lock_i;
+    ASSERT(lock != NULL);
+    new_prty_elem->lock = lock;
     list_insert_ordered (&t_rec->priorities, &new_prty_elem->elem, &prty_sort, NULL); 
     
     top_prty_elem = list_entry (list_begin (&t_rec->priorities), struct priority_elem, elem);
     t_rec->priority = top_prty_elem->priority;
   }
+  
+  return lock;
 }
 
-/* Resets priority of thread upon releasing lock */
+/* Sets priority of thread upon releasing lock. */
 void
 thread_undonate_priority (struct thread *t_next)
 {
   struct thread *t_curr = thread_current ();
   struct priority_elem *org_prty_elem = list_entry (list_rbegin (&t_curr->priorities), struct priority_elem, elem);
   
+  /* Remove the donated priority from the list. */
   if (t_next->priority > org_prty_elem->priority)
   {
     struct list_elem *e;
@@ -481,6 +471,9 @@ thread_undonate_priority (struct thread *t_next)
     
     list_remove (e);
     free (prty_elem);
+    
+    /* Set the priority of the thread to the highest
+       priority in the donated list. */
     top_prty_elem = list_entry (list_begin (&t_curr->priorities), struct priority_elem, elem);
     t_curr->priority = top_prty_elem->priority;
   }

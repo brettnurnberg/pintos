@@ -29,7 +29,6 @@
 #include "threads/synch.h"
 #include <stdio.h>
 #include <string.h>
-#include "threads/init.h"
 #include "threads/interrupt.h"
 #include "threads/thread.h"
 
@@ -215,23 +214,15 @@ lock_acquire (struct lock *lock)
   ASSERT (!lock_held_by_current_thread (lock));
 
   struct thread *t = thread_current ();
-  struct lock *lock_i;
-  //when setting lock required, we could check if it is null, and if it is not null, then do not set it and do not unset it.
   t->lock_req = lock;
-  enum intr_level old_level;
 
-  if (is_boot_complete () && lock->holder != NULL)
+  if (lock->holder != NULL)
   {
-    old_level = intr_disable ();
     while (t != NULL && t->lock_req != NULL)
     {
-      lock_i = t->lock_req;
-      thread_donate_priority (t->lock_req->holder, t->lock_req);
-      t->lock_req = lock_i;
+      t->lock_req = thread_donate_priority (t->lock_req->holder, t->lock_req);
       t = t->lock_req->holder;
     }
-    intr_set_level (old_level);
-
   }
   
   sema_down (&lock->semaphore);
@@ -270,7 +261,7 @@ lock_release (struct lock *lock)
   ASSERT (lock != NULL);
   ASSERT (lock_held_by_current_thread (lock));
 
-  if (!list_empty (&thread_current ()->priorities) && !list_empty (&lock->semaphore.waiters) && is_boot_complete ())
+  if (!list_empty (&thread_current ()->priorities) && !list_empty (&lock->semaphore.waiters))
     thread_undonate_priority (list_entry (list_begin (&lock->semaphore.waiters), struct thread, elem));
 
   lock->holder = NULL;
