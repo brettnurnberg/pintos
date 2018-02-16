@@ -214,20 +214,31 @@ lock_acquire (struct lock *lock)
   ASSERT (!lock_held_by_current_thread (lock));
 
   struct thread *t = thread_current ();
-  t->lock_req = lock;
-
+  
+  if(t->lock_req == NULL)
+  {
+    t->lock_req = lock;
+  }
+  
+  enum intr_level old_level;
+  
   if (lock->holder != NULL)
   {
+    old_level = intr_disable();
     while (t != NULL && t->lock_req != NULL)
     {
       t->lock_req = thread_donate_priority (t->lock_req->holder, t->lock_req);
       t = t->lock_req->holder;
     }
+    intr_set_level(old_level);
   }
   
   sema_down (&lock->semaphore);
   lock->holder = thread_current ();
-  thread_current ()->lock_req = NULL;
+  if(thread_current()->lock_req == lock)
+  {
+    thread_current ()->lock_req = NULL;
+  }
 }
 
 /* Tries to acquires LOCK and returns true if successful or false
