@@ -357,11 +357,17 @@ thread_set_priority (int new_priority)
 
   if (!list_empty (&t->priorities))
   {
+    struct priority_elem *top_prty_elem;
     struct priority_elem *org_prty_elem = list_entry (list_rbegin (&t->priorities), struct priority_elem, elem);
     org_prty_elem->priority = new_priority;
+    
+    top_prty_elem = list_entry (list_begin (&t->priorities), struct priority_elem, elem);
+    t->priority = top_prty_elem->priority;
   }
-
-  t->priority = new_priority;
+  else
+  {
+    t->priority = new_priority;
+  }
   
   if (!list_empty (&ready_list))
   {
