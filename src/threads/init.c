@@ -131,7 +131,7 @@ main (void)
 #endif
 
   /* State that boot is complete */
-  printf("Boot complete\n");
+  printf ("Boot complete.\n");
   boot_complete = 1;
   
   /* Run actions specified on kernel command line. */
