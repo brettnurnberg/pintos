@@ -4,6 +4,8 @@
 #include <debug.h>
 #include <list.h>
 #include <stdint.h>
+#include "threads/synch.h"
+#include "filesys/file.h"
 
 /* States in a thread's life cycle. */
 enum thread_status
@@ -23,6 +25,21 @@ typedef int tid_t;
 #define PRI_MIN 0                       /* Lowest priority. */
 #define PRI_DEFAULT 31                  /* Default priority. */
 #define PRI_MAX 63                      /* Highest priority. */
+
+/* Track the completion of a process.
+   Reference held by both the parent, in its `children' list,
+   and by the child, in its `wait_status' pointer. */
+struct wait_status
+  {
+    struct list_elem elem;  /* `children' list element. */
+    struct lock lock;       /* Protects ref_cnt. */
+    int ref_cnt;            /* 2=child and parent both alive,
+                               1=either child or parent alive,
+                               0=child and parent both dead.*/
+    tid_t tid;              /* Child thread id. */
+    int exit_code;          /* Child exit code, if dead. */
+    struct semaphore dead;  /* 0=child alive, 1=child dead. */
+  };
 
 /* A kernel thread or user process.
 
@@ -96,6 +113,13 @@ struct thread
 #ifdef USERPROG
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
+    struct wait_status *wait_status;    /* Status of the process. */
+    struct list children;               /* List of children processes. */
+    struct file *bin_file;              /* Executable. */
+
+    /* Owned by syscall.c. */
+    struct list fds;                    /* List of file descriptors. */
+    int next_handle;                    /* Next handle value. */
 #endif
 
     /* Owned by thread.c. */

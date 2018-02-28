@@ -7,6 +7,7 @@
 #include "threads/flags.h"
 #include "threads/interrupt.h"
 #include "threads/intr-stubs.h"
+#include "threads/malloc.h"
 #include "threads/palloc.h"
 #include "threads/switch.h"
 #include "threads/synch.h"
@@ -183,6 +184,19 @@ thread_create (const char *name, int priority,
   init_thread (t, name, priority);
   tid = t->tid = allocate_tid ();
 
+#ifdef USERPROG
+  /* Create wait_status for child process
+     and add to list of children.  */
+  struct wait_status *ws = (struct wait_status*) malloc (sizeof (struct wait_status));
+  lock_init (&ws->lock);
+  ws->ref_cnt = 2;
+  ws->tid = tid;
+  ws->exit_code = -1;
+  sema_init (&ws->dead, 0);
+  t->wait_status = ws;
+  list_push_front (&thread_current ()->children, &ws->elem);
+#endif
+  
   /* Stack frame for kernel_thread(). */
   kf = alloc_frame (t, sizeof *kf);
   kf->eip = NULL;
@@ -463,6 +477,12 @@ init_thread (struct thread *t, const char *name, int priority)
   t->stack = (uint8_t *) t + PGSIZE;
   t->priority = priority;
   t->magic = THREAD_MAGIC;
+
+#ifdef USERPROG
+  t->bin_file = NULL;
+  list_init (&t->children);
+  list_init (&t->fds);
+#endif
 
   old_level = intr_disable ();
   list_push_back (&all_list, &t->allelem);
