@@ -1,0 +1,27 @@
+Currently Failing Tests: (26/80)
+  sc-bad-sp
+  sc-bad-arg
+  sc-boundary-3
+  exec-once
+  exec-arg
+  exec-bound
+  exec-bound-2
+  exec-bound-3
+  exec-multiple
+  exec-missing
+  wait-simple
+  wait-twice
+  wait-killed
+  multi-recurse
+  multi-child-fd
+  rox-child
+  rox-multichild
+  multi-oom
+  lg-full
+  lg-seq-block
+  lg-seq-random
+  sm-full
+  sm-seq-block
+  sm-seq-random
+  syn-read
+  syn-write

@@ -112,10 +112,17 @@ process_wait (tid_t child_tid)
   
   /* If child is child of this thread and is still alive,
      block the parent thread. */
-  if (child != NULL && !child->dead.value)
+  if (child != NULL)
     {
-      sema_down (&child->dead);
-      status = child->exit_code;
+      if (!child->is_checked)
+        {
+          child->is_checked = 1;
+          if (!child->dead.value)
+            {
+              sema_down (&child->dead);
+            }
+          status = child->exit_code;
+        }
     }
   
   return status;

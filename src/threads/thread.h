@@ -19,6 +19,7 @@ enum thread_status
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
+typedef int pid_t;
 #define TID_ERROR ((tid_t) -1)          /* Error value for tid_t. */
 
 /* Thread priorities. */
@@ -28,10 +29,11 @@ typedef int tid_t;
 
 /* Track the completion of a process.
    Reference held by both the parent, in its `children' list,
-   and by the child, in its `wait_status' pointer. */
+   and by the child, in its 'wait_status' pointer. */
 struct wait_status
   {
-    struct list_elem elem;  /* `children' list element. */
+    struct list_elem elem;  /* 'children' list element. */
+    bool is_checked;        /* True if parent has waited for child. */
     struct lock lock;       /* Protects ref_cnt. */
     int ref_cnt;            /* 2=child and parent both alive,
                                1=either child or parent alive,
@@ -39,6 +41,14 @@ struct wait_status
     tid_t tid;              /* Child thread id. */
     int exit_code;          /* Child exit code, if dead. */
     struct semaphore dead;  /* 0=child alive, 1=child dead. */
+  };
+
+/* File descriptor struct */
+struct file_descriptor
+  {
+    struct list_elem elem;  /* 'fds' list element. */
+    struct file *file;      /* File pointer. */
+    int handle;             /* File handle. */
   };
 
 /* A kernel thread or user process.

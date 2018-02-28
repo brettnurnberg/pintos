@@ -187,7 +187,10 @@ thread_create (const char *name, int priority,
 #ifdef USERPROG
   /* Create wait_status for child process
      and add to list of children.  */
+  t->next_handle = 2;
+  list_init (&t->fds);
   struct wait_status *ws = (struct wait_status*) malloc (sizeof (struct wait_status));
+  ws->is_checked = 0;
   lock_init (&ws->lock);
   ws->ref_cnt = 2;
   ws->tid = tid;
