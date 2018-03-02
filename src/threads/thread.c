@@ -196,6 +196,7 @@ thread_create (const char *name, int priority,
   ws->tid = tid;
   ws->exit_code = -1;
   sema_init (&ws->dead, 0);
+  sema_init (&ws->load, 0);
   t->wait_status = ws;
   list_push_front (&thread_current ()->children, &ws->elem);
 #endif

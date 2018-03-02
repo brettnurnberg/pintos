@@ -60,6 +60,7 @@ static void
 start_process (void *cmdline)
 {
   struct intr_frame if_;
+  struct thread *t = thread_current ();
   bool success;
   
   /* Initialize interrupt frame and load executable. */
@@ -68,11 +69,19 @@ start_process (void *cmdline)
   if_.cs = SEL_UCSEG;
   if_.eflags = FLAG_IF | FLAG_MBS;
   success = load (cmdline, &if_.eip, &if_.esp);
-
+  
   /* If load failed, quit. */
   palloc_free_page (cmdline);
-  if (!success) 
-    thread_exit ();
+  if (!success)
+    {
+      t->wait_status->tid = -1;
+      sema_up (&t->wait_status->load);
+      thread_exit ();
+    }
+  else
+    {
+      sema_up (&t->wait_status->load);
+    }
 
   /* Start the user process by simulating a return from an
      interrupt, implemented by intr_exit (in
@@ -93,22 +102,11 @@ start_process (void *cmdline)
 int
 process_wait (tid_t child_tid) 
 {
-  struct thread *parent = thread_current ();
-  struct wait_status *temp;
-  struct wait_status *child = NULL;
-  struct list_elem *e;
+  struct wait_status *child;
   int status = -1;
   
-  /* Search list of children for given child. */
-  for (e = list_begin (&parent->children); e != list_end (&parent->children); e = list_next (e))
-    {
-      temp = list_entry (e, struct wait_status, elem);
-      if (temp->tid == child_tid)
-        {
-          child = temp;
-          break;
-        }
-    }
+  /* Find given child on list of children. */
+  child = get_child (child_tid);
   
   /* If child is child of this thread and is still alive,
      block the parent thread. */
@@ -133,7 +131,7 @@ void
 process_exit (void)
 {
   struct thread *cur = thread_current ();
-  struct thread *child;
+  struct wait_status *child;
   struct list_elem *e;
   uint32_t *pd;
   
@@ -154,23 +152,30 @@ process_exit (void)
       if (!cur->wait_status->ref_cnt)
         {
           free (cur->wait_status);
+          cur->wait_status = NULL;
         }
       
       /* Set parent status to dead. */
-      for (e = list_begin (&cur->children); e != list_end (&cur->children); e = list_next (e))
+      e = list_begin (&cur->children);
+      while (e != list_end (&cur->children))
         {
-          child = list_entry (e, struct thread, elem);
-          lock_acquire (&child->wait_status->lock);
-          child->wait_status->ref_cnt--;
-          lock_release (&child->wait_status->lock);
-          if (!child->wait_status->ref_cnt)
+          child = list_entry (e, struct wait_status, elem);
+          lock_acquire (&child->lock);
+          child->ref_cnt--;
+          lock_release (&child->lock);
+          if (!child->ref_cnt)
             {
-              free (child->wait_status);
+              e = list_remove (e);
+              free (child);
+              child = NULL;
             }
+          else
+             e = list_next (e);
         }
       
       /* Wake up waiting parent. */
-      sema_up (&cur->wait_status->dead);
+      if (cur->wait_status != NULL)
+        sema_up (&cur->wait_status->dead);
       
       /* Close the binary */
       file_close (cur->bin_file);
@@ -614,4 +619,28 @@ install_page (void *upage, void *kpage, bool writable)
      address, then map our page there. */
   return (pagedir_get_page (t->pagedir, upage) == NULL
           && pagedir_set_page (t->pagedir, upage, kpage, writable));
+}
+
+/* Returns wait_status struct of given child,
+   or NULL if child does not exist. */
+struct wait_status*
+get_child (pid_t child_pid)
+{
+  struct thread *parent = thread_current ();
+  struct wait_status *temp;
+  struct wait_status *child = NULL;
+  struct list_elem *e;
+  
+  /* Search list of children for given child. */
+  for (e = list_begin (&parent->children); e != list_end (&parent->children); e = list_next (e))
+    {
+      temp = list_entry (e, struct wait_status, elem);
+      if (temp->tid == child_pid)
+        {
+          child = temp;
+          break;
+        }
+    }
+    
+  return child;
 }

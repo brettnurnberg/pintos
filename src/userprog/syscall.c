@@ -78,6 +78,7 @@ syscall_handler (struct intr_frame *f)
   uint32_t argv[3];
 
   /* Get the system call. */
+  verify_address (f->esp);
   memcpy (&call_num, f->esp, sizeof (call_num));
   if (call_num >= NUM_SYSCALL)
     {
@@ -85,6 +86,10 @@ syscall_handler (struct intr_frame *f)
     }
   
   /* Get the system call arguments. */
+  for (uint8_t i = 0; i < syscall_table[call_num].arg_cnt; i++)
+    {
+      verify_address ((uint32_t *) f->esp + i + 1);
+    }
   memset (argv, 0, sizeof (argv));
   memcpy (argv, (uint32_t *) f->esp + 1,
           sizeof (argv[0]) * syscall_table[call_num].arg_cnt);
@@ -119,9 +124,22 @@ static uint32_t
 sys_exec (uint32_t *argv)
 {
   const char *cmd_line = (const char *) argv[0];
+  struct wait_status *child;
+  pid_t pid;
   
   verify_address (cmd_line);
-  return (uint32_t) process_execute (cmd_line);
+  pid = process_execute (cmd_line);
+  
+  child = get_child (pid);
+  
+  ASSERT (child != NULL);
+  
+  if (child->load.value != 1)
+    sema_down (&child->load);
+  
+  pid = child->tid;
+  
+  return pid;
 }
 
 /* Waits on given process id. */
@@ -351,7 +369,16 @@ static void
 verify_address (const void *vaddr)
 {
   uint32_t *pd = thread_current ()->pagedir;
+  void *end_add;
+  
   if (vaddr == NULL || !is_user_vaddr (vaddr) || pagedir_get_page (pd, vaddr) == NULL)
+    {
+      thread_exit ();
+    }
+
+  end_add = (uint8_t *) vaddr + 3;
+  
+  if (end_add == NULL || !is_user_vaddr (end_add) || pagedir_get_page (pd, end_add) == NULL)
     {
       thread_exit ();
     }
