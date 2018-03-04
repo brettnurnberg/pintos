@@ -8,6 +8,7 @@
 #include <string.h>
 #include "userprog/gdt.h"
 #include "userprog/pagedir.h"
+#include "userprog/syscall.h"
 #include "userprog/tss.h"
 #include "filesys/directory.h"
 #include "filesys/file.h"
@@ -132,6 +133,7 @@ process_exit (void)
 {
   struct thread *cur = thread_current ();
   struct wait_status *child;
+  struct file_descriptor *fd;
   struct list_elem *e;
   uint32_t *pd;
   
@@ -172,13 +174,27 @@ process_exit (void)
           else
              e = list_next (e);
         }
+
+      /* Close all open files */
+      lock_acquire (&fs_lock);
+      e = list_begin (&cur->fds);
+      while (e != list_end (&cur->fds))
+        {
+          fd = list_entry (e, struct file_descriptor, elem);
+          e = list_remove (e);
+          file_close (fd->file);
+          free (fd);
+        }
+      lock_release (&fs_lock);
       
       /* Wake up waiting parent. */
       if (cur->wait_status != NULL)
         sema_up (&cur->wait_status->dead);
       
       /* Close the binary */
+      lock_acquire (&fs_lock);
       file_close (cur->bin_file);
+      lock_release (&fs_lock);
       
       /* Correct ordering here is crucial.  We must set
          cur->pagedir to NULL before switching page directories,
@@ -430,8 +446,7 @@ load (const char *cmdline, void (**eip) (void), void **esp)
 
  done:
   /* We arrive here whether the load is successful or not. */
-  if (success == false)
-    file_close (file);
+  
   return success;
 }
 

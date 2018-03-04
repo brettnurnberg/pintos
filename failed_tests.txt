@@ -1,9 +1,0 @@
-Currently Failing Tests: (8/80)
-  multi-oom
-  lg-full
-  lg-seq-block
-  lg-seq-random
-  sm-full
-  sm-seq-block
-  sm-seq-random
-  syn-read

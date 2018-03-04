@@ -35,7 +35,7 @@ static syscall_function sys_seek;
 static syscall_function sys_tell;
 static syscall_function sys_close;
 
-static struct lock fs_lock;
+struct lock fs_lock;
 
 /* Initializes system call functionality */
 void
@@ -260,7 +260,7 @@ sys_read (uint32_t *argv)
       if (fd != NULL)
         {
           lock_acquire (&fs_lock);
-          ret = (uint32_t) file_read_at (fd->file, buffer, size, file_tell (fd->file));
+          ret = (uint32_t) file_read (fd->file, buffer, size);
           lock_release (&fs_lock);
         }
     }
@@ -300,7 +300,7 @@ sys_write (uint32_t *argv)
       if (fd != NULL)
         {
           lock_acquire (&fs_lock);
-          ret = (uint32_t) file_write_at (fd->file, buffer, size, file_tell (fd->file));
+          ret = (uint32_t) file_write (fd->file, buffer, size);
           lock_release (&fs_lock);
         }
     }
