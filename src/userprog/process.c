@@ -36,8 +36,6 @@ process_execute (const char *cmdline)
   char file_name[16];
   tid_t tid;
   
-  //may need to disable interrupts until thread_create returns?
-  
   /* Make a copy of CMDLINE.
      Otherwise there's a race between the caller and load(). */
   cl_copy = palloc_get_page (0);
