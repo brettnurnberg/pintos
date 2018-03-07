@@ -28,6 +28,7 @@ We also used the same format for our table of system calls that the project
 2 session document uses.
 
 
+
 			   ARGUMENT PASSING
 			   ================
 
@@ -74,7 +75,11 @@ One advantage of the Unix approach is that the kernel does not have to
 deal with non-existing executables. Because the shell parses the
 executable name, it can check whether the executable exists or not.
 
-Another possible advantage of the Unix approach 
+Another possible advantage of the Unix approach is that the kernel
+doesn't have to spend time allocating space for the tokenized
+arguments. It will know how much space it needs for the arguments
+as soon as they are passed to the kernel from the shell.
+
 
 
 			     SYSTEM CALLS
@@ -120,11 +125,30 @@ struct file_descriptor
 >> Are file descriptors unique within the entire OS or just within a
 >> single process?
 
+File descriptors consist of the file structure, a list element, and
+an integer handle. Within each process, we keep a variable to track
+the next available integer that hasn't been used as a handle. In this
+way, each handle will refer to a single file descriptor and vice versa.
+The file descriptors are created in a call to open() and removed in a
+call to close(). During a call to open(), the file descriptors simply
+set their file structure pointer to the address of the opened file.
+
+In our implementation, file descriptors are unique only within each
+process. Each process has its own list of file descriptors with
+handles that are unique only to that process.
+
 
 ---- ALGORITHMS ----
 
 >> B3: Describe your code for reading and writing user data from the
 >> kernel.
+
+We implemented the simple solution to reading and writing user data
+from the kernel. Whenever the user passes a pointer, we simply verify
+that the pointer is not NULL, is a user address, and exists in valid
+memory. We then check that the end of the read/written range is also
+valid memory. If the entire range of the data is in valid memory,
+we then dereference the pointer.
 
 >> B4: Suppose a system call causes a full page (4,096 bytes) of data
 >> to be copied from user space into the kernel.  What is the least
@@ -133,8 +157,37 @@ struct file_descriptor
 >> for a system call that only copies 2 bytes of data?  Is there room
 >> for improvement in these numbers, and how much?
 
+For this question, I assumed that the user memory was contiguous.
+If the 4kB of data lines up directly at the start of a page, only
+1 page would need to be found from the page table. However, in all
+other situations, the data would overlap between 2 pages, so we
+would need to do 2 page table inspections. Reading 2 bytes of data
+would almost always require a single page table inspection, except
+in the rare case that the two bytes occurred between overlapping pages.
+In this case, we would need to do 2 page table inspections.
+
+Using the above assertions, there is a 99.98% chance that we would need
+to do 2 page table inspections for the 4kB data, and a 0.02% chance
+that we would need to do 2 page table inspections for the 2 bytes.
+Increasing the page sizes would increase the decrease the odds that
+we would need to do 2 page table inspections, but there will always be
+a chance that we need to do 2 inspections.
+
 >> B5: Briefly describe your implementation of the "wait" system call
 >> and how it interacts with process termination.
+
+We implemented the "wait" system call by simply calling process_wait().
+process_wait() uses the wait_status structure to track the current
+status of the child. Each process has a list of all of its childrens'
+wait_status structures. When a process calls process_wait(pid), it
+searches its list of children for the given child, and if the child
+exists and has not already been waited on and is still alive, the
+parent will block on the child's "dead" semaphore.
+
+Process_wait() then interacts with process termination in process_exit().
+In a call to process_exit(), the processes exit status is saved and
+then its "dead" semaphore is upped, and the waiting parent is woken up.
+The waiting parent can then retrieve the child's exit status.
 
 >> B6: Any access to user program memory at a user-specified address
 >> can fail due to a bad pointer value.  Such accesses must cause the
@@ -150,12 +203,44 @@ struct file_descriptor
 >> paragraphs, describe the strategy or strategies you adopted for
 >> managing these issues.  Give an example.
 
+We avoided obscuring the code in error-handling by defining a simple
+function, verify_address(), which will verify that the pointer is not
+NULL, is a user address, and exists in valid memory. We then check
+that the end of the read/written range is also valid memory. If the
+entire range of the data is in valid memory, we then dereference
+the pointer.
+
+Upon receiving an invalid pointer, we call thread_exit(), which then
+calls process_exit(). Process_exit() then makes sure that all temporary
+allocated resources are freed. It first releases its own wait_status
+structure and then releases all wait_status structures of dead children.
+It also closes all currently open files and frees the file descriptors.
+We ensure that all local buffers and locks are freed by not allocating
+buffers or acquiring locks until all necessary addresses are verified.
+
+One example is a user call to write(). In the system call write(), 
+the first thing we do is verify the address of the beginning and
+end of the supplied buffer. If the entire buffer resides in valid
+memory, we then acquire the file system lock and write the data.
+If part of the buffer resides in invalid memory, we call thread_exit()
+which will release all file_descriptor structs and wait_status structs.
+
 ---- SYNCHRONIZATION ----
 
 >> B7: The "exec" system call returns -1 if loading the new executable
 >> fails, so it cannot return before the new executable has completed
 >> loading.  How does your code ensure this?  How is the load
 >> success/failure status passed back to the thread that calls "exec"?
+
+Our code ensures that the calling process does not return until the
+new process has attempted to load by blocking the calling process on a
+"load" semaphore on the new process. The "load" semaphore is kept in
+the thread structure. The new process will then unblock the calling
+process once it has attempted to load.
+
+The load success/failure status is passed back to the thread by simply
+setting the new process' pid to -1 if the load was unsuccessful.
+Otherwise, the new process' pid is unchanged from its original pid.
 
 >> B8: Consider parent process P with child process C.  How do you
 >> ensure proper synchronization and avoid race conditions when P
@@ -164,17 +249,51 @@ struct file_descriptor
 >> terminates without waiting, before C exits?  After C exits?  Are
 >> there any special cases?
 
+We ensure proper synchronization for all possible orders of parents
+waiting, parents exiting, and children exiting by using a single
+semaphore for each child. When a parent calls wait(pid), it will
+search its list of children for the given child. If the child
+has already been waited on, wait() returns -1. If the child has
+already died, wait() returns the exit status. If the child is still
+alive, the parent blocks on the child's "dead" semaphore. Then,
+when the child dies, it unblocks the parent and wait() will return
+the exit status.
+
+We ensure that the wait_status struct is released in all possible
+cases by keeping a reference count in the wait_status struct. Upon
+creation, the reference count will be 2 because both the parent and
+child are still alive. Whenever a process dies, it decrements its own
+ref_cnt as well as all of its children's ref_cnts. Once the ref_cnt
+reaches 0, we know that both the parent and child are dead and we
+free the wait_status struct. In this way, we ensure that the
+wait_status struct is freed no matter who exits first.
+
 ---- RATIONALE ----
 
 >> B9: Why did you choose to implement access to user memory from the
 >> kernel in the way that you did?
 
+While our implementation is not as fast as allowing the access to
+page fault and then handle the fault in exception.c, it was very
+simple to implement. We chose our implementation because it was simple.
+
 >> B10: What advantages or disadvantages can you see to your design
 >> for file descriptors?
+
+One of the advantages of our file descriptor design is that the
+handles are only unique within a single process, so we did not
+have to worry about synchronization of getting handle values.
+
+One possible disadvantage is that there is some overhead involved in
+finding a file descriptor from a given handle. We kept our file 
+descriptors in a linked list, and our search time is therefore O(n).
 
 >> B11: The default tid_t to pid_t mapping is the identity mapping.
 >> If you changed it, what advantages are there to your approach?
 
+We did not change the tid_t to pid_t mapping. We used the identity
+mapping because it was simple. The advantage of our mapping is
+that it took 3 seconds to implement.
 
 			   SURVEY QUESTIONS
 			   ================
