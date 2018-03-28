@@ -2,6 +2,7 @@
 #define THREADS_THREAD_H
 
 #include <debug.h>
+#include <hash.h>
 #include <list.h>
 #include <stdint.h>
 #include "threads/synch.h"
@@ -15,22 +16,6 @@ enum thread_status
     THREAD_DYING        /* About to be destroyed. */
   };
 
-/* Priority element for list of donated priorities */
-struct priority_elem
-  {
-    int priority;                       /* Donated priority. */
-    struct lock *lock;                  /* Lock that donated the priority. */
-    struct list_elem elem;              /* List element. */
-  };
-  
-/* Data for a sleeping thread */
-struct sleep
-  {
-    struct semaphore sema;              /* Sema to block thread. */
-    struct list_elem elem;              /* Used for list of sleepers. */
-    int64_t wake_time;                  /* Time to wake thread. */
-  };
-	
 /* Thread identifier type.
    You can redefine this to whatever type you like. */
 typedef int tid_t;
@@ -107,23 +92,47 @@ struct thread
     int priority;                       /* Priority. */
     struct list_elem allelem;           /* List element for all threads list. */
 
+    /* Owned by process.c. */
+    int exit_code;                      /* Exit code. */
+    struct wait_status *wait_status;    /* This process's completion status. */
+    struct list children;               /* Completion status of children. */
+
     /* Shared between thread.c and synch.c. */
     struct list_elem elem;              /* List element. */
-		
-    /* Owned by timer.c. */
-    struct sleep sleep;                 /* Sleeping thread data */
-    
-    /* Owned by synch.c. */
-    struct list priorities;             /* List of donated priorities. */
-    struct lock *lock_req;              /* Lock that thread is waiting on. */
 
-#ifdef USERPROG
+    /* Alarm clock. */
+    int64_t wakeup_time;                /* Time to wake this thread up. */
+    struct list_elem timer_elem;        /* Element in timer_wait_list. */
+    struct semaphore timer_sema;        /* Semaphore. */
+
     /* Owned by userprog/process.c. */
     uint32_t *pagedir;                  /* Page directory. */
-#endif
+    struct hash *pages;                 /* Page table. */
+    struct file *bin_file;              /* The binary executable. */
+
+    /* Owned by syscall.c. */
+    struct list fds;                    /* List of file descriptors. */
+    struct list mappings;               /* Memory-mapped files. */
+    int next_handle;                    /* Next handle value. */
+    void *user_esp;                     /* User's stack pointer. */
 
     /* Owned by thread.c. */
     unsigned magic;                     /* Detects stack overflow. */
+  };
+
+/* Tracks the completion of a process.
+   Reference held by both the parent, in its `children' list,
+   and by the child, in its `wait_status' pointer. */
+struct wait_status
+  {
+    struct list_elem elem;              /* `children' list element. */
+    struct lock lock;                   /* Protects ref_cnt. */
+    int ref_cnt;                        /* 2=child and parent both alive,
+                                           1=either child or parent alive,
+                                           0=child and parent both dead. */
+    tid_t tid;                          /* Child thread id. */
+    int exit_code;                      /* Child exit code, if dead. */
+    struct semaphore dead;              /* 1=child alive, 0=child dead. */
   };
 
 /* If false (default), use round-robin scheduler.
@@ -156,8 +165,6 @@ void thread_foreach (thread_action_func *, void *);
 
 int thread_get_priority (void);
 void thread_set_priority (int);
-struct lock *thread_donate_priority (struct thread *t_rec, struct lock* lock);
-void thread_undonate_priority (struct thread *t_next);
 
 int thread_get_nice (void);
 void thread_set_nice (int);

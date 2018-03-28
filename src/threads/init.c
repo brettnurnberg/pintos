@@ -37,12 +37,11 @@
 #include "filesys/filesys.h"
 #include "filesys/fsutil.h"
 #endif
+#include "vm/frame.h"
+#include "vm/swap.h"
 
 /* Page directory with kernel mappings only. */
 uint32_t *init_page_dir;
-
-/* True if boot has completed */
-static bool boot_complete = 0;
 
 #ifdef FILESYS
 /* -f: Format the file system? */
@@ -87,7 +86,7 @@ main (void)
   /* Break command line into arguments and parse options. */
   argv = read_command_line ();
   argv = parse_options (argv);
-  
+
   /* Initialize ourselves as a thread so we can use locks,
      then enable console locking. */
   thread_init ();
@@ -130,9 +129,10 @@ main (void)
   filesys_init (format_filesys);
 #endif
 
-  /* State that boot is complete */
+  frame_init ();
+  swap_init ();
+
   printf ("Boot complete.\n");
-  boot_complete = 1;
   
   /* Run actions specified on kernel command line. */
   run_actions (argv);
@@ -141,13 +141,6 @@ main (void)
   shutdown ();
   thread_exit ();
 }
-
-/* Returns true if boot is complete */
-bool is_boot_complete (void)
-{
-  return boot_complete;
-}
-
 
 /* Clear the "BSS", a segment that should be initialized to
    zeros.  It isn't actually stored on disk or zeroed by the
