@@ -48,13 +48,38 @@ page_for_addr (const void *address)
       p.addr = (void *) pg_round_down (address);
       e = hash_find (thread_current ()->pages, &p.hash_elem);
       if (e != NULL)
-        return hash_entry (e, struct page, hash_elem);
-
-      /* No page.  Expand stack? */
-
-/* add code */
-
+        {
+          return hash_entry (e, struct page, hash_elem);
+        }
+      else
+        {
+          /* No page.  Check to expand stack. */
+          struct thread* curr = thread_current ();
+          if ( ((uint8_t*)address == (uint8_t*)curr->user_esp - 4)
+            || ((uint8_t*)address == (uint8_t*)curr->user_esp - 32) )
+            {
+              struct page *page;
+              struct page *tpage = NULL;
+              bool first = true;
+              void *temp_addr = address;
+              
+              while ((page = page_allocate (temp_addr, false)) != NULL) 
+                {
+                  if (first)
+                    {
+                      tpage = page;
+                      first = false;
+                    }
+                  page->read_only = false;
+                  page->private = false;
+                  temp_addr = (uint8_t*)temp_addr + 4096;
+                }
+              return tpage;
+            }
+        }
+      
     }
+    
   return NULL;
 }
 
