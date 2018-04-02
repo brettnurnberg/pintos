@@ -504,7 +504,7 @@ lookup_mapping (int handle)
 static void
 unmap (struct mapping *m) 
 {
-  int i;
+  uint32_t i;
   uint8_t *addr = m->base;
   struct thread *cur = thread_current ();
   
@@ -515,7 +515,7 @@ unmap (struct mapping *m)
       if (pagedir_is_dirty (cur->pagedir, addr))
         {
           lock_acquire (&fs_lock);
-          file_write_at (m->file, addr, 4096, 4096 * i);
+          file_write_at (m->file, addr, 4096, 4096 * i);  //may need to change size 4096 to page->file_bytes
           lock_release (&fs_lock);
         }
       
@@ -530,7 +530,7 @@ unmap (struct mapping *m)
   lock_release (&fs_lock);
   free (m);
   
-  return 0;
+  return;
 }
  
 /* Mmap system call. */
