@@ -161,8 +161,6 @@ page_out (struct page *p)
 {
   bool dirty;
   bool ok = true;
-  void *kaddr;
-  struct frame *f = p->frame;
   
   ASSERT (p->frame != NULL);
   ASSERT (lock_held_by_current_thread (&p->frame->lock));

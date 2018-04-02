@@ -1,0 +1,141 @@
+              +---------------------------+
+              |         CIS 520           |
+              | PROJECT 3: Virtual Memory |
+              |     DESIGN DOCUMENT       |
+              +---------------------------+
+
+---- GROUP ----
+
+>> Fill in the names of your group members.
+
+Zach Doll
+Brandt Hill
+Brett Nurnberg
+
+---- PRELIMINARIES ----
+
+>> If you have any preliminary comments on your submission, notes for the
+>> TAs, or extra credit, please give them here.
+
+>> Please cite any offline or online sources you consulted while
+>> preparing your submission, other than the Pintos documentation, course
+>> text, lecture notes, and course staff.
+
+			PAGE TABLE MANAGEMENT
+			=====================
+
+---- ALGORITHMS ----
+
+>> A1: In a few paragraphs, describe the existing code for locating the
+>> frame, if any, that contains the data of a given page.
+
+The page structure contains a reference to the frame that it is held in, or
+NULL if the page is not in physical memory. The frame is set during a call
+to page_in(). An open frame is found by calling frame_alloc_and_lock(). The
+page's frame is then cleared when the page is removed from physical memory
+in a call to page_out().
+
+---- SYNCHRONIZATION ----
+
+>> A2: When two user processes both need a new frame at the same time,
+>> how are races avoided?
+
+There is a scan_lock lock that must be acquired before searching for a
+free frame. It is then freed when a frame (or no frame) is found.
+
+		       PAGING TO AND FROM DISK
+		       =======================
+
+---- ALGORITHMS ----
+
+>> B1: When a frame is required but none is free, some frame must be
+>> evicted.  Describe the algorithm used to choose a frame to evict.
+
+The implemented frame eviction algorithm is a version of not recently
+used. If no free frame is found, we search through all frames until we
+find a page that has not been recently accessed and that is not pinned.
+We then evict the page from this frame.
+
+>> B2: Explain your heuristic for deciding whether a page fault for an
+>> invalid virtual address should cause the stack to be extended into
+>> the page that faulted.
+
+If the fault occurs 4 or 32 bytes below the stack pointer.
+
+			 MEMORY MAPPED FILES
+			 ===================
+
+---- DATA STRUCTURES ----
+
+>> C1: Copy here the declaration of each new or changed `struct' or
+>> `struct' member, global or static variable, `typedef', or
+>> enumeration.  Identify the purpose of each in 25 words or less.
+
+---- ALGORITHMS ----
+
+>> C2: Describe how memory mapped files integrate into your virtual
+>> memory subsystem.  Explain how the page fault and eviction
+>> processes differ between swap pages and other pages.
+
+Memory mapped files act as a cache for files in physical memory
+so that future accesses are faster than accessing the file on the disk.
+Memory mapped files are implemented by allocating user pages on which
+to copy the file data.
+
+When paging in swap pages, we simply read the page in from the swap device.
+When paging out swap pages, we simply write the page to the swap device.
+When paging in memory mapped pages, we read the data in from the
+corresponding file. When paging out memory mapped pages, we first check
+if the file is private or not. If the file is private, we write out to
+the swap. If the file is not private, but is dirty, we write back to
+the file. If the file is not dirty, we do not write it anywhere.
+
+>> C3: Explain how you determine whether a new file mapping overlaps
+>> any existing segment.
+
+We allocate the space for the memory mapping in virtual memory using
+the page_allocate() function, which ensures that the mapping cannot
+overwrite any existing pages in virtual memory. When we write the
+data back to the file, we call file_write_at(), which ensures
+that the file will not overwrite an existing file.
+
+---- RATIONALE ----
+
+>> C4: Mappings created with "mmap" have similar semantics to those of
+>> data demand-paged from executables, except that "mmap" mappings are
+>> written back to their original files, not to swap.  This implies
+>> that much of their implementation can be shared.  Explain why your
+>> implementation either does or does not share much of the code for
+>> the two situations.
+
+We have a boolean variable in the page structure to keep track of
+whether data from a file should be written to the swap or back to the
+file. This allows us to use the same implementation for paging in data
+from memory mapped files and executable files. The implementation only
+differs for paging out the files, in which case the memory mapped files
+are written to the corresponding file and the executable files are
+written to the swap.
+
+			   SURVEY QUESTIONS
+			   ================
+
+Answering these questions is optional, but it will help us improve the
+course in future quarters.  Feel free to tell us anything you
+want--these questions are just to spur your thoughts.  You may also
+choose to respond anonymously in the course evaluations at the end of
+the quarter.
+
+>> In your opinion, was this assignment, or any one of the three problems
+>> in it, too easy or too hard?  Did it take too long or too little time?
+
+>> Did you find that working on a particular part of the assignment gave
+>> you greater insight into some aspect of OS design?
+
+>> Is there some particular fact or hint we should give students in
+>> future quarters to help them solve the problems?  Conversely, did you
+>> find any of our guidance to be misleading?
+
+>> Do you have any suggestions for the TAs to more effectively assist
+>> students, either for future quarters or the remaining projects?
+
+>> Any other comments?

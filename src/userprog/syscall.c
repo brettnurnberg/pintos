@@ -515,7 +515,7 @@ unmap (struct mapping *m)
       if (pagedir_is_dirty (cur->pagedir, addr))
         {
           lock_acquire (&fs_lock);
-          file_write_at (m->file, addr, 4096, 4096 * i);  //may need to change size 4096 to page->file_bytes
+          file_write_at (m->file, addr, 4096, 4096 * i);
           lock_release (&fs_lock);
         }
       
